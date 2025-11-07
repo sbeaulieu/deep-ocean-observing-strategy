@@ -1,6 +1,6 @@
 #Levin_SCB_OBIS
 #Stace Beaulieu
-#2025-11-06
+#2025-11-07
 
 # R script to standardize Lisa Levin's SCB data to Darwin Core (DwC)
 # and output tables for OBIS
@@ -22,24 +22,23 @@ library(stringr) # when using worrms for QC
 
 #Load datasheets
 
-counts_input <- readxl::read_xlsx("levin_obis_data_SCB Hardground macrofauna.xlsx", sheet = "Occurrence Info")
+counts_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "Occurrence Info")
 #counts_input <- readxl::read_xlsx("Levin_Guraieb SCB Hard Substrates_ SCB.xlsx", sheet = "Macrofauna Counts")
-# 2 more than WoRMS table bc manually removed
 
-events_input <- readxl::read_xlsx("levin_obis_data_SCB Hardground macrofauna.xlsx", sheet = "eventTable Info")
+events_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "eventTable Info")
 #events_input <- readxl::read_xlsx("Levin_Guraieb SCB Hard Substrates_ SCB.xlsx", sheet = "Depth LL  T O2 Substrate etc.")
 
 # taxa sheet edited from WoRMS Taxon Match tool output
-taxa_input <- readxl::read_xlsx("levin_obis_data_SCB Hardground macrofauna.xlsx", sheet = "WoRMS match")
+taxa_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "WoRMS match")
 
-# some edits are needed for the taxa_input
+# QC for taxa input
+# the sheet "WoRMS match" has some manual edits 
 # I want to use the column LSID for scientificNameID
-# note some LSID entries need edits
 # need to strip LSID prefix for wm_id2name
 stripped <- sub(".*:(\\d+)$", "\\1", taxa_input$LSID)
 stripped_int <- as.integer(stripped[grepl("^[0-9]+$", stripped)])
-check_names <- wm_id2name_(id = stripped_int)
-#need to edit the LSIDs input first so list same length
+check_names <- wm_id2name_(id = stripped_int) # this takes a minute or so
+#need to edit the LSIDs input if list not same length
 taxa_input_filtered <- taxa_input %>%
   filter(str_starts(LSID, "urn"))
 taxa_input_filtered$check_names <- unlist(check_names) 
@@ -53,6 +52,7 @@ event_dwc <- events_input %>%
   rename(verbatimLabel = "Sample number") %>%
   rename(decimalLatitude = "Latitude") %>%
   rename(decimalLongitude = "Longitude") %>%
+  rename(locationRemarks = "Station") %>%
   rename(habitat = "Habitat") %>%
   rename(verbatimDepth = "Water Depth (M)") %>%
   rename(sampleSizeValue = "Rock Surface Area (cm2)") # note one value is character E
@@ -65,11 +65,18 @@ event_dwc$sampleSizeUnit <- "Rock Surface Area (cm2)"
 event_dwc <- event_dwc %>%
   unite(col='eventID', c('Cruise', 'Dive', 'Rock number', 'verbatimLabel'), sep = "_", remove = FALSE, na.rm = FALSE)
 
-# create DwC eventRemarks from multiple columns
-# include temp and oxygen but ultimately move to emof
-# note this could be improved by adding descriptive strings for each column's value
+# create DwC dynamicProperties from multiple columns
+# (consider move temp and oxygen to emof)
+# using CF standard names
 event_dwc <- event_dwc %>%
-  unite(col='eventRemarks', c('Station', 'Temperature', 'Oxygen (umol/L)'), sep = "|", remove = TRUE, na.rm = FALSE)
+  rename(Oxygen = "Oxygen (umol/L)")
+event_dwc <- event_dwc %>%
+  mutate(dynamicProperties = paste0("{\"sea_water_temperature (degree_Celsius)\":", Temperature, ", \"mole_concentration_of_dissolved_molecular_oxygen_in_sea_water (micromol.L-1)\":", Oxygen, "}"))
+# note there are extra quotes in the csv output that do not show in the RStudio view
+
+# no longer using eventRemarks
+# event_dwc <- event_dwc %>%
+#   unite(col='eventRemarks', c('Station', 'Temperature', 'Oxygen (umol/L)'), sep = "|", remove = TRUE, na.rm = FALSE)
 
 # create min and max Depth equiv to verbatimDepth
 event_dwc$minimumDepthInMeters <- event_dwc$verbatimDepth
@@ -78,14 +85,18 @@ event_dwc$maximumDepthInMeters <- event_dwc$verbatimDepth
 # consider adding countryCode needed for GBIF
 event_dwc$countryCode <- "US"
 
+# consider adding geodeticDatum
+
 #Finish DwC events table
 # remove extra columns
+# consider specifying column order
 # DwC basisOfRecord will go into occurrence table
-# consider publishing Temperature and Oxygen in emof table
-event <- select(event_dwc, -basisOfRecord, -Cruise, -Dive, -'Rock number', - 'Proximity to shore',-starts_with(".."))
-#write.csv(event, 'event.csv', row.names=FALSE)
-               
-# consider adding geodeticDatum
+event <- select(event_dwc, -basisOfRecord, -Cruise, -Dive, -'Rock number', - 'Proximity to shore',-starts_with(".."), -Temperature, -Oxygen)
+
+# QC that there are no NAs
+any(is.na(event)) # Returns FALSE if there are no missing values.
+
+
 
 #Initiate DwC occurrence extension table
 # first add column with row counter for "verbatimID" (was "Species morphotype")
@@ -134,21 +145,29 @@ occurrence_dwc <- full_join(occurrence_dwc, taxa, by = 'verbatimIdentification')
 
 # add remaining required DwC terms for OBIS
 occurrence_dwc$basisOfRecord <- "PreservedSpecimen"
-
 # already removed zero individualCount
 occurrence_dwc$occurrenceStatus <- "present" # if remove zero individualCount
 
-# rename to DwC and exclude non-DwC columns
+# rename to DwC
 occurrence_dwc <- occurrence_dwc %>%
   rename(scientificName = "ScientificName") %>%
   rename(scientificNameID = "LSID") %>%
   rename(kingdom = "Kingdom")
 
+#Finish DwC occurrence table exclude non-DwC columns
 col_order <- c("occurrenceID", "verbatimIdentification", "individualCount", "scientificName", "scientificNameID",
                "kingdom", "occurrenceStatus",
                "basisOfRecord", "eventID")
 occurrence <- occurrence_dwc[, col_order]
-#write.csv(occurrence, 'occurrence.csv', row.names=FALSE)
+
+# QC that there are no NAs
+any(is.na(occurrence)) # Returns FALSE if there are no missing values.
+
 
 # QC matching bw event and occurrence
 occ_event_match <- full_join(occurrence, event, by = 'eventID')
+
+#Output files
+#write.csv(event, 'event.csv', row.names=FALSE)
+#write.csv(occurrence, 'occurrence.csv', row.names=FALSE)
+
