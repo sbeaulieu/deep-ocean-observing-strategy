@@ -1,6 +1,6 @@
 #Levin_SCB_OBIS
 #Stace Beaulieu
-#2025-11-07
+#2025-11-10
 
 # R script to standardize Lisa Levin's SCB data to Darwin Core (DwC)
 # and output tables for OBIS
@@ -72,7 +72,6 @@ event_dwc <- event_dwc %>%
   rename(Oxygen = "Oxygen (umol/L)")
 event_dwc <- event_dwc %>%
   mutate(dynamicProperties = paste0("{\"sea_water_temperature (degree_Celsius)\":", Temperature, ", \"mole_concentration_of_dissolved_molecular_oxygen_in_sea_water (micromol.L-1)\":", Oxygen, "}"))
-# note there are extra quotes in the csv output that do not show in the RStudio view
 
 # no longer using eventRemarks
 # event_dwc <- event_dwc %>%
@@ -168,6 +167,6 @@ any(is.na(occurrence)) # Returns FALSE if there are no missing values.
 occ_event_match <- full_join(occurrence, event, by = 'eventID')
 
 #Output files
-#write.csv(event, 'event.csv', row.names=FALSE)
-#write.csv(occurrence, 'occurrence.csv', row.names=FALSE)
+#write.csv(event, 'event.csv', row.names=FALSE, quote = FALSE)
+#write.csv(occurrence, 'occurrence.csv', row.names=FALSE, quote = FALSE)
 
