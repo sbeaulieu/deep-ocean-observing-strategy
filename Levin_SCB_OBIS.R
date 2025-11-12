@@ -1,6 +1,6 @@
 #Levin_SCB_OBIS
 #Stace Beaulieu
-#2025-11-10
+#2025-11-12
 
 # R script to standardize Lisa Levin's SCB data to Darwin Core (DwC)
 # and output tables for OBIS
@@ -17,19 +17,19 @@ setwd("/Users/sbeaulieu/Downloads")
 library(readxl)
 library(dplyr)
 library(tidyr)
-library(worrms) # use worrms for QC and to populate taxonRank
+library(worrms) # use worrms for QC (and to populate taxonRank)
 library(stringr) # when using worrms for QC
 
 #Load datasheets
 
-counts_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "Occurrence Info")
+counts_input <- readxl::read_xlsx("v2.levin_obis_data_SCB_Hardground_macrofauna_20251111.xlsx", sheet = "Occurrence Info")
 #counts_input <- readxl::read_xlsx("Levin_Guraieb SCB Hard Substrates_ SCB.xlsx", sheet = "Macrofauna Counts")
 
-events_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "eventTable Info")
+events_input <- readxl::read_xlsx("v2.levin_obis_data_SCB_Hardground_macrofauna_20251111.xlsx", sheet = "eventTable Info")
 #events_input <- readxl::read_xlsx("Levin_Guraieb SCB Hard Substrates_ SCB.xlsx", sheet = "Depth LL  T O2 Substrate etc.")
 
 # taxa sheet edited from WoRMS Taxon Match tool output
-taxa_input <- readxl::read_xlsx("levin_obis_data_SCB_Hardground_macrofauna_20251107_1430.xlsx", sheet = "WoRMS match")
+taxa_input <- readxl::read_xlsx("v2.levin_obis_data_SCB_Hardground_macrofauna_20251111.xlsx", sheet = "WoRMS match")
 
 # QC for taxa input
 # the sheet "WoRMS match" has some manual edits 
@@ -45,6 +45,24 @@ taxa_input_filtered$check_names <- unlist(check_names)
 taxa_input_filtered$equal <- taxa_input_filtered$ScientificName == taxa_input_filtered$check_names
 taxa_input_filtered[!taxa_input_filtered$equal, ]
 
+# two morphospecies merged into Monoplacophora sp.1
+# the join to counts needs distinct verbatimIdentification
+taxa_input_distinct <- dplyr::distinct(taxa_input)
+# need to retain original order of counts_input for row numbering
+counts_input_vIrow <- counts_input %>% mutate(vIrow = row_number())
+counts_input_vIrow$vIrow <- sprintf("%03d", counts_input_vIrow$vIrow) # pad with leading zero to 3 characters
+counts_input_distinct <- counts_input_vIrow %>%
+  group_by(verbatimID) %>%
+  summarise(
+    across(where(is.numeric), sum),
+    vIrow = first(vIrow)
+    )
+# sort by vIrow to retain order in output occurrence file
+counts_input_distinct <- arrange(counts_input_distinct, vIrow)
+
+# confirm sum of all counts
+sum(counts_input[sapply(counts_input, is.numeric)])
+sum(counts_input_distinct[sapply(counts_input_distinct, is.numeric)])
 
 #Initiate DwC events table
 # rename columns to DwC terms
@@ -98,10 +116,12 @@ any(is.na(event)) # Returns FALSE if there are no missing values.
 
 
 #Initiate DwC occurrence extension table
-# first add column with row counter for "verbatimID" (was "Species morphotype")
-# to be used as suffix for occurrenceID
-counts <- counts_input %>% mutate(vIrow = row_number())
-counts$vIrow <- sprintf("%03d", counts$vIrow) # pad with leading zero to 3 characters
+# # first add column with row counter for "verbatimID" (was "Species morphotype")
+# # to be used as suffix for occurrenceID
+# counts <- counts_input_distinct %>% mutate(vIrow = row_number())
+# counts$vIrow <- sprintf("%03d", counts$vIrow) # pad with leading zero to 3 characters
+
+counts <- counts_input_distinct
 
 # QC that the counts column headers
 # are equivalent to the verbatimLabel 
@@ -138,7 +158,7 @@ occurrence_dwc <- counts_long_present_eventID %>%
 
 # join taxonomic standardization
 
-taxa <- taxa_input %>%
+taxa <- taxa_input_distinct %>%
   rename(verbatimIdentification = "verbatimID")
 occurrence_dwc <- full_join(occurrence_dwc, taxa, by = 'verbatimIdentification')
 
